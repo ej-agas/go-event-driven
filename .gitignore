@@ -1,0 +1,7 @@
+# Exercise content is subject to Three Dots Labs' copyright.
+**/exercise.md
+.idea
+go.work
+go.work.sum
+.tdl-exercise
+.tdl-training
