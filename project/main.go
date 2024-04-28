@@ -11,7 +11,11 @@ import (
 	"github.com/ThreeDotsLabs/go-event-driven/common/clients/spreadsheets"
 	commonHTTP "github.com/ThreeDotsLabs/go-event-driven/common/http"
 	"github.com/ThreeDotsLabs/go-event-driven/common/log"
+	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
+	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/labstack/echo/v4"
+	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 )
 
@@ -27,8 +31,23 @@ func main() {
 		panic(err)
 	}
 
-	worker := NewWorker(NewReceiptsClient(clients), NewSpreadsheetsClient(clients))
-	go worker.Run()
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: os.Getenv("REDIS_ADDR"),
+	})
+
+	logger := log.NewWatermill(logrus.NewEntry(logrus.StandardLogger()))
+
+	publisher, err := redisstream.NewPublisher(redisstream.PublisherConfig{
+		Client: redisClient,
+	}, logger)
+
+	sub, err := redisstream.NewSubscriber(redisstream.SubscriberConfig{
+		Client: redisClient,
+	}, logger)
+
+	worker := NewWorker(publisher, sub, NewReceiptsClient(clients), NewSpreadsheetsClient(clients))
+	go worker.ProcessIssueReceiptMessages()
+	go worker.ProcessAppendToTrackerMessages()
 
 	e := commonHTTP.NewEcho()
 
@@ -40,15 +59,8 @@ func main() {
 		}
 
 		for _, ticket := range request.Tickets {
-			worker.Send(Message{
-				Task:   TaskIssueReceipt,
-				Ticket: ticket,
-			})
-
-			worker.Send(Message{
-				Task:   TaskAppendToTracker,
-				Ticket: ticket,
-			})
+			worker.Send("issue-receipt", message.NewMessage(watermill.NewUUID(), []byte(ticket)))
+			worker.Send("append-to-tracker", message.NewMessage(watermill.NewUUID(), []byte(ticket)))
 		}
 
 		return c.NoContent(http.StatusOK)
@@ -114,56 +126,61 @@ func (c SpreadsheetsClient) AppendRow(ctx context.Context, spreadsheetName strin
 	return nil
 }
 
-type Task int
-
-const (
-	TaskIssueReceipt Task = iota
-	TaskAppendToTracker
-)
-
-type Message struct {
-	Task   Task
-	Ticket string
-}
-
 type Worker struct {
-	queue              chan Message
+	publisher          *redisstream.Publisher
+	subscriber         *redisstream.Subscriber
 	receiptsClient     ReceiptsClient
 	spreadSheetsClient SpreadsheetsClient
 }
 
-func NewWorker(receiptsClient ReceiptsClient, spreadsheetsClient SpreadsheetsClient) *Worker {
+func NewWorker(
+	publisher *redisstream.Publisher,
+	subscriber *redisstream.Subscriber,
+	receiptsClient ReceiptsClient,
+	spreadsheetsClient SpreadsheetsClient,
+) *Worker {
 	return &Worker{
-		queue:              make(chan Message, 100),
+		publisher:          publisher,
+		subscriber:         subscriber,
 		receiptsClient:     receiptsClient,
 		spreadSheetsClient: spreadsheetsClient,
 	}
 }
 
-func (w *Worker) Run() {
-	for msg := range w.queue {
-		switch msg.Task {
-		case TaskIssueReceipt:
-			if err := w.receiptsClient.IssueReceipt(context.Background(), msg.Ticket); err != nil {
-				fmt.Println("task")
-				logrus.Warning("task 'issue receipt' failed. sending back to queue...")
-				w.Send(msg)
-			}
-		case TaskAppendToTracker:
-			if err := w.spreadSheetsClient.AppendRow(
-				context.Background(),
-				"tickets-to-print",
-				[]string{msg.Ticket},
-			); err != nil {
-				fmt.Println("task 'append to tracker' failed. sending back to queue...")
-				w.Send(msg)
-			}
+func (w *Worker) ProcessIssueReceiptMessages() {
+	messages, err := w.subscriber.Subscribe(context.Background(), "issue-receipt")
+	if err != nil {
+		panic(err)
+	}
+
+	for msg := range messages {
+		if err := w.receiptsClient.IssueReceipt(msg.Context(), string(msg.Payload)); err != nil {
+			logrus.WithError(err).Error("failed to issue the receipt")
+			msg.Nack()
+			continue
 		}
+
+		msg.Ack()
 	}
 }
 
-func (w *Worker) Send(message ...Message) {
-	for _, m := range message {
-		w.queue <- m
+func (w *Worker) ProcessAppendToTrackerMessages() {
+	messages, err := w.subscriber.Subscribe(context.Background(), "append-to-tracker")
+	if err != nil {
+		panic(err)
 	}
+
+	for msg := range messages {
+		if err := w.spreadSheetsClient.AppendRow(msg.Context(), "tickets-to-print", []string{string(msg.Payload)}); err != nil {
+			logrus.WithError(err).Error("failed to append to tracker")
+			msg.Nack()
+			continue
+		}
+
+		msg.Ack()
+	}
+}
+
+func (w *Worker) Send(topic string, msg ...*message.Message) {
+	w.publisher.Publish(topic, msg...)
 }
