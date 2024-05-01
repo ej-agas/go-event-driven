@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
@@ -30,27 +30,13 @@ func main() {
 		panic(err)
 	}
 
-	pub, err := redisstream.NewPublisher(redisstream.PublisherConfig{
-		Client: rdb,
-	}, logger)
-	if err != nil {
-		panic(err)
-	}
-
-	router.AddHandler(
-		"handler-one",
-		"temperature-celsius",
-		sub,
+	router.AddNoPublisherHandler(
+		"handler-foo",
 		"temperature-fahrenheit",
-		pub,
-		func(msg *message.Message) ([]*message.Message, error) {
-			fahrenheit, err := celsiusToFahrenheit(string(msg.Payload))
-			if err != nil {
-				return nil, err
-			}
-
-			newMsg := message.NewMessage(watermill.NewUUID(), []byte(fahrenheit))
-			return []*message.Message{newMsg}, nil
+		sub,
+		func(msg *message.Message) error {
+			fmt.Printf("Temperature read: %s\n", msg.Payload)
+			return nil
 		},
 	)
 
@@ -58,13 +44,4 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func celsiusToFahrenheit(temperature string) (string, error) {
-	celsius, err := strconv.Atoi(temperature)
-	if err != nil {
-		return "", err
-	}
-
-	return strconv.Itoa(celsius*9/5 + 32), nil
 }

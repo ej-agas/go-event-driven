@@ -45,9 +45,20 @@ func main() {
 		Client: redisClient,
 	}, logger)
 
-	worker := NewWorker(publisher, sub, NewReceiptsClient(clients), NewSpreadsheetsClient(clients))
+	router, err := message.NewRouter(message.RouterConfig{}, logger)
+	if err != nil {
+		panic(err)
+	}
+
+	worker := NewWorker(publisher, sub, NewReceiptsClient(clients), NewSpreadsheetsClient(clients), router)
 	go worker.ProcessIssueReceiptMessages()
 	go worker.ProcessAppendToTrackerMessages()
+	go func() {
+		err := router.Run(context.Background())
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 	e := commonHTTP.NewEcho()
 
@@ -131,6 +142,7 @@ type Worker struct {
 	subscriber         *redisstream.Subscriber
 	receiptsClient     ReceiptsClient
 	spreadSheetsClient SpreadsheetsClient
+	router             *message.Router
 }
 
 func NewWorker(
@@ -138,47 +150,45 @@ func NewWorker(
 	subscriber *redisstream.Subscriber,
 	receiptsClient ReceiptsClient,
 	spreadsheetsClient SpreadsheetsClient,
+	router *message.Router,
 ) *Worker {
 	return &Worker{
 		publisher:          publisher,
 		subscriber:         subscriber,
 		receiptsClient:     receiptsClient,
 		spreadSheetsClient: spreadsheetsClient,
+		router:             router,
 	}
 }
 
 func (w *Worker) ProcessIssueReceiptMessages() {
-	messages, err := w.subscriber.Subscribe(context.Background(), "issue-receipt")
-	if err != nil {
-		panic(err)
-	}
-
-	for msg := range messages {
-		if err := w.receiptsClient.IssueReceipt(msg.Context(), string(msg.Payload)); err != nil {
-			logrus.WithError(err).Error("failed to issue the receipt")
-			msg.Nack()
-			continue
-		}
-
-		msg.Ack()
-	}
+	w.router.AddNoPublisherHandler(
+		"receipt-messages-handler",
+		"issue-receipt",
+		w.subscriber,
+		func(msg *message.Message) error {
+			if err := w.receiptsClient.IssueReceipt(msg.Context(), string(msg.Payload)); err != nil {
+				logrus.WithError(err).Error("failed to issue the receipt")
+				return err
+			}
+			return nil
+		},
+	)
 }
 
 func (w *Worker) ProcessAppendToTrackerMessages() {
-	messages, err := w.subscriber.Subscribe(context.Background(), "append-to-tracker")
-	if err != nil {
-		panic(err)
-	}
-
-	for msg := range messages {
-		if err := w.spreadSheetsClient.AppendRow(msg.Context(), "tickets-to-print", []string{string(msg.Payload)}); err != nil {
-			logrus.WithError(err).Error("failed to append to tracker")
-			msg.Nack()
-			continue
-		}
-
-		msg.Ack()
-	}
+	w.router.AddNoPublisherHandler(
+		"append-to-tracker-handler",
+		"append-to-tracker",
+		w.subscriber,
+		func(msg *message.Message) error {
+			if err := w.spreadSheetsClient.AppendRow(msg.Context(), "tickets-to-print", []string{string(msg.Payload)}); err != nil {
+				logrus.WithError(err).Error("failed to append to tracker")
+				return err
+			}
+			return nil
+		},
+	)
 }
 
 func (w *Worker) Send(topic string, msg ...*message.Message) {
