@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 
 	"github.com/ThreeDotsLabs/go-event-driven/common/clients"
 	"github.com/ThreeDotsLabs/go-event-driven/common/clients/receipts"
@@ -17,6 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 type TicketsConfirmationRequest struct {
@@ -53,15 +56,8 @@ func main() {
 	worker := NewWorker(publisher, sub, NewReceiptsClient(clients), NewSpreadsheetsClient(clients), router)
 	go worker.ProcessIssueReceiptMessages()
 	go worker.ProcessAppendToTrackerMessages()
-	go func() {
-		err := router.Run(context.Background())
-		if err != nil {
-			panic(err)
-		}
-	}()
 
 	e := commonHTTP.NewEcho()
-
 	e.POST("/tickets-confirmation", func(c echo.Context) error {
 		var request TicketsConfirmationRequest
 		err := c.Bind(&request)
@@ -77,10 +73,43 @@ func main() {
 		return c.NoContent(http.StatusOK)
 	})
 
+	e.GET("/health", func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
 	logrus.Info("Server starting...")
 
-	err = e.Start(":8080")
-	if err != nil && err != http.ErrServerClosed {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	errgrp, ctx := errgroup.WithContext(ctx)
+
+	// start router in separate goroutine
+	errgrp.Go(func() error {
+		return router.Run(ctx)
+	})
+
+	// start http server in separate goroutine
+	errgrp.Go(func() error {
+		// wait for watermill router to run before starting http server
+		<-router.Running()
+
+		err := e.Start(":8080")
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+
+		return nil
+	})
+
+	// wait for os interrupt before shutting down server gracefully
+	errgrp.Go(func() error {
+		<-ctx.Done()
+		return e.Shutdown(ctx)
+	})
+
+	err = errgrp.Wait()
+	if err != nil {
 		panic(err)
 	}
 }
