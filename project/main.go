@@ -40,23 +40,19 @@ type TicketsStatusRequest struct {
 	Tickets []TicketStatus `json:"tickets"`
 }
 
-type IssueReceiptPayload struct {
-	TicketID string `json:"ticket_id"`
-	Price    Price  `json:"price"`
-}
-
-type AppendToTrackerPayload struct {
-	TicketID      string `json:"ticket_id"`
-	CustomerEmail string `json:"customer_email"`
-	Price         Price  `json:"price"`
-}
-
 type EventHeader struct {
 	ID          string    `json:"id"`
 	PublishedAt time.Time `json:"published_at"`
 }
 
 type TicketBookingConfirmed struct {
+	Header        EventHeader `json:"header"`
+	TicketID      string      `json:"ticket_id"`
+	CustomerEmail string      `json:"customer_email"`
+	Price         Price       `json:"price"`
+}
+
+type TicketBookingCanceled struct {
 	Header        EventHeader `json:"header"`
 	TicketID      string      `json:"ticket_id"`
 	CustomerEmail string      `json:"customer_email"`
@@ -100,6 +96,7 @@ func main() {
 	worker := NewWorker(publisher, sub, NewReceiptsClient(clients), NewSpreadsheetsClient(clients), router)
 	go worker.ProcessIssueReceiptMessages()
 	go worker.ProcessAppendToTrackerMessages()
+	go worker.ProcessTicketsToRefund()
 
 	e := commonHTTP.NewEcho()
 	e.POST("/tickets-status", func(c echo.Context) error {
@@ -110,11 +107,24 @@ func main() {
 		}
 
 		for _, ticket := range request.Tickets {
-			event := TicketBookingConfirmed{
-				Header:        NewEventHeader(),
-				TicketID:      ticket.TicketID,
-				CustomerEmail: ticket.CustomerEmail,
-				Price:         ticket.Price,
+			var event interface{}
+			topic := "TicketBookingConfirmed"
+
+			if ticket.Status == "canceled" {
+				event = TicketBookingCanceled{
+					Header:        NewEventHeader(),
+					TicketID:      ticket.TicketID,
+					CustomerEmail: ticket.CustomerEmail,
+					Price:         ticket.Price,
+				}
+				topic = "TicketBookingCanceled"
+			} else {
+				event = TicketBookingConfirmed{
+					Header:        NewEventHeader(),
+					TicketID:      ticket.TicketID,
+					CustomerEmail: ticket.CustomerEmail,
+					Price:         ticket.Price,
+				}
 			}
 
 			payload, err := json.Marshal(event)
@@ -122,9 +132,8 @@ func main() {
 				return err
 			}
 
-			worker.Send("TicketBookingConfirmed", message.NewMessage(watermill.NewUUID(), payload))
+			worker.Send(topic, message.NewMessage(watermill.NewUUID(), payload))
 		}
-
 		return c.NoContent(http.StatusOK)
 	})
 
@@ -257,7 +266,7 @@ func (w *Worker) ProcessIssueReceiptMessages() {
 		"TicketBookingConfirmed",
 		w.subscriber,
 		func(msg *message.Message) error {
-			var payload IssueReceiptPayload
+			var payload TicketBookingConfirmed
 
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				return err
@@ -286,7 +295,7 @@ func (w *Worker) ProcessAppendToTrackerMessages() {
 		"TicketBookingConfirmed",
 		w.subscriber,
 		func(msg *message.Message) error {
-			var payload AppendToTrackerPayload
+			var payload TicketBookingConfirmed
 
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				return err
@@ -295,6 +304,31 @@ func (w *Worker) ProcessAppendToTrackerMessages() {
 			if err := w.spreadSheetsClient.AppendRow(
 				msg.Context(),
 				"tickets-to-print",
+				[]string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency},
+			); err != nil {
+				logrus.WithError(err).Error("failed to append to tracker")
+				return err
+			}
+			return nil
+		},
+	)
+}
+
+func (w *Worker) ProcessTicketsToRefund() {
+	w.router.AddNoPublisherHandler(
+		"process-tickets-to-refund-handler",
+		"TicketBookingCanceled",
+		w.subscriber,
+		func(msg *message.Message) error {
+			var payload TicketBookingCanceled
+
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				return err
+			}
+
+			if err := w.spreadSheetsClient.AppendRow(
+				msg.Context(),
+				"tickets-to-refund",
 				[]string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency},
 			); err != nil {
 				logrus.WithError(err).Error("failed to append to tracker")
