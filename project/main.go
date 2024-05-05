@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/ThreeDotsLabs/go-event-driven/common/clients"
 	"github.com/ThreeDotsLabs/go-event-driven/common/clients/receipts"
@@ -22,8 +24,50 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type TicketsConfirmationRequest struct {
-	Tickets []string `json:"tickets"`
+type TicketStatus struct {
+	TicketID      string `json:"ticket_id"`
+	Status        string `json:"status"`
+	Price         Price  `json:"price"`
+	CustomerEmail string `json:"customer_email"`
+}
+
+type Price struct {
+	Amount   string `json:"amount"`
+	Currency string `json:"currency"`
+}
+
+type TicketsStatusRequest struct {
+	Tickets []TicketStatus `json:"tickets"`
+}
+
+type IssueReceiptPayload struct {
+	TicketID string `json:"ticket_id"`
+	Price    Price  `json:"price"`
+}
+
+type AppendToTrackerPayload struct {
+	TicketID      string `json:"ticket_id"`
+	CustomerEmail string `json:"customer_email"`
+	Price         Price  `json:"price"`
+}
+
+type EventHeader struct {
+	ID          string    `json:"id"`
+	PublishedAt time.Time `json:"published_at"`
+}
+
+type TicketBookingConfirmed struct {
+	Header        EventHeader `json:"header"`
+	TicketID      string      `json:"ticket_id"`
+	CustomerEmail string      `json:"customer_email"`
+	Price         Price       `json:"price"`
+}
+
+func NewEventHeader() EventHeader {
+	return EventHeader{
+		ID:          watermill.NewUUID(),
+		PublishedAt: time.Now().UTC(),
+	}
 }
 
 func main() {
@@ -58,16 +102,27 @@ func main() {
 	go worker.ProcessAppendToTrackerMessages()
 
 	e := commonHTTP.NewEcho()
-	e.POST("/tickets-confirmation", func(c echo.Context) error {
-		var request TicketsConfirmationRequest
+	e.POST("/tickets-status", func(c echo.Context) error {
+		var request TicketsStatusRequest
 		err := c.Bind(&request)
 		if err != nil {
 			return err
 		}
 
 		for _, ticket := range request.Tickets {
-			worker.Send("issue-receipt", message.NewMessage(watermill.NewUUID(), []byte(ticket)))
-			worker.Send("append-to-tracker", message.NewMessage(watermill.NewUUID(), []byte(ticket)))
+			event := TicketBookingConfirmed{
+				Header:        NewEventHeader(),
+				TicketID:      ticket.TicketID,
+				CustomerEmail: ticket.CustomerEmail,
+				Price:         ticket.Price,
+			}
+
+			payload, err := json.Marshal(event)
+			if err != nil {
+				return err
+			}
+
+			worker.Send("TicketBookingConfirmed", message.NewMessage(watermill.NewUUID(), payload))
 		}
 
 		return c.NoContent(http.StatusOK)
@@ -124,9 +179,15 @@ func NewReceiptsClient(clients *clients.Clients) ReceiptsClient {
 	}
 }
 
-func (c ReceiptsClient) IssueReceipt(ctx context.Context, ticketID string) error {
+type IssueReceiptRequest struct {
+	TicketID string
+	Price    receipts.Money
+}
+
+func (c ReceiptsClient) IssueReceipt(ctx context.Context, request IssueReceiptRequest) error {
 	body := receipts.PutReceiptsJSONRequestBody{
-		TicketId: ticketID,
+		TicketId: request.TicketID,
+		Price:    request.Price,
 	}
 
 	receiptsResp, err := c.clients.Receipts.PutReceiptsWithResponse(ctx, body)
@@ -193,10 +254,24 @@ func NewWorker(
 func (w *Worker) ProcessIssueReceiptMessages() {
 	w.router.AddNoPublisherHandler(
 		"receipt-messages-handler",
-		"issue-receipt",
+		"TicketBookingConfirmed",
 		w.subscriber,
 		func(msg *message.Message) error {
-			if err := w.receiptsClient.IssueReceipt(msg.Context(), string(msg.Payload)); err != nil {
+			var payload IssueReceiptPayload
+
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				return err
+			}
+
+			issueReceiptRequest := IssueReceiptRequest{
+				TicketID: payload.TicketID,
+				Price: receipts.Money{
+					MoneyAmount:   payload.Price.Amount,
+					MoneyCurrency: payload.Price.Currency,
+				},
+			}
+
+			if err := w.receiptsClient.IssueReceipt(msg.Context(), issueReceiptRequest); err != nil {
 				logrus.WithError(err).Error("failed to issue the receipt")
 				return err
 			}
@@ -208,10 +283,20 @@ func (w *Worker) ProcessIssueReceiptMessages() {
 func (w *Worker) ProcessAppendToTrackerMessages() {
 	w.router.AddNoPublisherHandler(
 		"append-to-tracker-handler",
-		"append-to-tracker",
+		"TicketBookingConfirmed",
 		w.subscriber,
 		func(msg *message.Message) error {
-			if err := w.spreadSheetsClient.AppendRow(msg.Context(), "tickets-to-print", []string{string(msg.Payload)}); err != nil {
+			var payload AppendToTrackerPayload
+
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				return err
+			}
+
+			if err := w.spreadSheetsClient.AppendRow(
+				msg.Context(),
+				"tickets-to-print",
+				[]string{payload.TicketID, payload.CustomerEmail, payload.Price.Amount, payload.Price.Currency},
+			); err != nil {
 				logrus.WithError(err).Error("failed to append to tracker")
 				return err
 			}
