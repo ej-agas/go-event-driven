@@ -380,8 +380,14 @@ func LoggingMiddleware(next message.HandlerFunc) message.HandlerFunc {
 		logger := log.FromContext(msg.Context())
 		logger = logger.WithField("message_uuid", msg.UUID)
 
+		msgs, err := next(msg)
+
+		if err != nil {
+			logger.WithError(err).Error("Message handling error")
+		}
+
 		logger.Info("Handling a message")
 
-		return next(msg)
+		return msgs, err
 	}
 }
