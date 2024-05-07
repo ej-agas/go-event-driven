@@ -19,6 +19,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/labstack/echo/v4"
+	"github.com/lithammer/shortuuid/v3"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -69,7 +70,13 @@ func NewEventHeader() EventHeader {
 func main() {
 	log.Init(logrus.InfoLevel)
 
-	clients, err := clients.NewClients(os.Getenv("GATEWAY_ADDR"), nil)
+	clients, err := clients.NewClients(
+		os.Getenv("GATEWAY_ADDR"),
+		func(ctx context.Context, req *http.Request) error {
+			req.Header.Set("Correlation-ID", log.CorrelationIDFromContext(ctx))
+			return nil
+		},
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -89,9 +96,13 @@ func main() {
 	}, logger)
 
 	router, err := message.NewRouter(message.RouterConfig{}, logger)
+
 	if err != nil {
 		panic(err)
 	}
+
+	router.AddMiddleware(CorrelationIDMiddleware)
+	router.AddMiddleware(LoggingMiddleware)
 
 	worker := NewWorker(publisher, sub, NewReceiptsClient(clients), NewSpreadsheetsClient(clients), router)
 	go worker.ProcessIssueReceiptMessages()
@@ -132,7 +143,10 @@ func main() {
 				return err
 			}
 
-			worker.Send(topic, message.NewMessage(watermill.NewUUID(), payload))
+			msg := message.NewMessage(watermill.NewUUID(), payload)
+			msg.Metadata.Set("correlation_id", c.Request().Header.Get("Correlation-ID"))
+
+			worker.Send(topic, msg)
 		}
 		return c.NoContent(http.StatusOK)
 	})
@@ -341,4 +355,33 @@ func (w *Worker) ProcessTicketsToRefund() {
 
 func (w *Worker) Send(topic string, msg ...*message.Message) {
 	w.publisher.Publish(topic, msg...)
+}
+
+func CorrelationIDMiddleware(next message.HandlerFunc) message.HandlerFunc {
+	return func(msg *message.Message) ([]*message.Message, error) {
+		ctx := msg.Context()
+
+		correlationID := msg.Metadata.Get("correlation_id")
+		if correlationID == "" {
+			correlationID = shortuuid.New()
+		}
+
+		ctx = log.ToContext(ctx, logrus.WithFields(logrus.Fields{"correlation_id": correlationID}))
+		ctx = log.ContextWithCorrelationID(ctx, correlationID)
+
+		msg.SetContext(ctx)
+
+		return next(msg)
+	}
+}
+
+func LoggingMiddleware(next message.HandlerFunc) message.HandlerFunc {
+	return func(msg *message.Message) ([]*message.Message, error) {
+		logger := log.FromContext(msg.Context())
+		logger = logger.WithField("message_uuid", msg.UUID)
+
+		logger.Info("Handling a message")
+
+		return next(msg)
+	}
 }

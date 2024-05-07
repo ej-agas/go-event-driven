@@ -14,6 +14,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
@@ -57,6 +58,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	router.AddMiddleware(middleware.CorrelationID)
 
 	pub, err := redisstream.NewPublisher(redisstream.PublisherConfig{
 		Client: rbd,
@@ -143,8 +146,7 @@ func main() {
 				return err
 			}
 
-			// TODO
-			correlationID := ""
+			correlationID := middleware.MessageCorrelationID(msg)
 
 			err = client.CreateTeamScoreboard(event.ID, correlationID)
 			if err != nil {
@@ -198,11 +200,14 @@ func main() {
 			return err
 		}
 
-		// TODO
 		correlationID := c.Request().Header.Get("Correlation-ID")
-		_ = correlationID
+
+		if correlationID == "" {
+			correlationID = watermill.NewUUID()
+		}
 
 		msg := message.NewMessage(uuid.NewString(), payload)
+		middleware.SetCorrelationID(correlationID, msg)
 
 		err = pub.Publish("player_joined", msg)
 		if err != nil {
