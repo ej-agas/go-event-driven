@@ -36,3 +36,10 @@ func (c SpreadsheetsAPIClient) AppendRow(ctx context.Context, spreadsheetName st
 
 	return nil
 }
+
+type SpreadsheetsAPIMock struct {
+}
+
+func (s SpreadsheetsAPIMock) AppendRow(ctx context.Context, sheetName string, row []string) error {
+	return nil
+}

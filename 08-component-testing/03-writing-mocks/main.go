@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -25,5 +26,18 @@ type ReceiptsService interface {
 }
 
 type ReceiptsServiceMock struct {
-	// todo: implement me
+	IssuedReceipts []IssueReceiptRequest
+	mock           sync.Mutex
+}
+
+func (r *ReceiptsServiceMock) IssueReceipt(ctx context.Context, request IssueReceiptRequest) (IssueReceiptResponse, error) {
+	r.mock.Lock()
+	defer r.mock.Unlock()
+
+	r.IssuedReceipts = append(r.IssuedReceipts, request)
+
+	return IssueReceiptResponse{
+		ReceiptNumber: "mock-number",
+		IssuedAt:      time.Now(),
+	}, nil
 }
