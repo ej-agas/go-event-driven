@@ -26,8 +26,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type TicketStatus struct {
-	TicketID      string `json:"ticket_id"`
+var malformedEventID = "2beaf5bc-d5e4-4653-b075-2b36bbf28949"
+
+type Ticket struct {
+	ID            string `json:"ticket_id"`
 	Status        string `json:"status"`
 	Price         Price  `json:"price"`
 	CustomerEmail string `json:"customer_email"`
@@ -39,7 +41,7 @@ type Price struct {
 }
 
 type TicketsStatusRequest struct {
-	Tickets []TicketStatus `json:"tickets"`
+	Tickets []Ticket `json:"tickets"`
 }
 
 type EventHeader struct {
@@ -127,37 +129,27 @@ func main() {
 			return err
 		}
 
-		for _, ticket := range request.Tickets {
-			var event interface{}
-			topic := "TicketBookingConfirmed"
+		correlationID := c.Request().Header.Get("Correlation-ID")
 
-			if ticket.Status == "canceled" {
-				event = TicketBookingCanceled{
-					Header:        NewEventHeader(),
-					TicketID:      ticket.TicketID,
-					CustomerEmail: ticket.CustomerEmail,
-					Price:         ticket.Price,
-				}
+		for _, ticket := range request.Tickets {
+			var topic string
+
+			event := createEvent(ticket)
+
+			switch event.(type) {
+			case TicketBookingConfirmed:
+				topic = "TicketBookingConfirmed"
+			case TicketBookingCanceled:
 				topic = "TicketBookingCanceled"
-			} else {
-				event = TicketBookingConfirmed{
-					Header:        NewEventHeader(),
-					TicketID:      ticket.TicketID,
-					CustomerEmail: ticket.CustomerEmail,
-					Price:         ticket.Price,
-				}
+			default:
+				return errors.New("invalid ticket booking event")
 			}
 
-			payload, err := json.Marshal(event)
-			if err != nil {
+			if err := publishMessage(worker, topic, event, correlationID); err != nil {
 				return err
 			}
-
-			msg := message.NewMessage(watermill.NewUUID(), payload)
-			msg.Metadata.Set("correlation_id", c.Request().Header.Get("Correlation-ID"))
-
-			worker.Send(topic, msg)
 		}
+
 		return c.NoContent(http.StatusOK)
 	})
 
@@ -200,6 +192,41 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func createEvent(ticket Ticket) interface{} {
+	header := NewEventHeader()
+
+	if ticket.Status == "canceled" {
+		return TicketBookingCanceled{
+			Header:        header,
+			TicketID:      ticket.ID,
+			CustomerEmail: ticket.CustomerEmail,
+			Price:         ticket.Price,
+		}
+	}
+
+	return TicketBookingConfirmed{
+		Header:        header,
+		TicketID:      ticket.ID,
+		CustomerEmail: ticket.CustomerEmail,
+		Price:         ticket.Price,
+	}
+}
+
+func publishMessage(worker *Worker, topic string, event interface{}, correlationID string) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+
+	msg := message.NewMessage(watermill.NewUUID(), payload)
+	msg.Metadata.Set("correlation_id", correlationID)
+	msg.Metadata.Set("type", topic)
+
+	worker.Send(topic, msg)
+
+	return nil
 }
 
 type ReceiptsClient struct {
@@ -292,8 +319,16 @@ func (w *Worker) ProcessIssueReceiptMessages() {
 		func(msg *message.Message) error {
 			var payload TicketBookingConfirmed
 
+			if msg.UUID == malformedEventID {
+				return nil
+			}
+
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				return err
+			}
+
+			if payload.Price.Currency == "" {
+				payload.Price.Currency = "USD"
 			}
 
 			issueReceiptRequest := IssueReceiptRequest{
@@ -321,8 +356,20 @@ func (w *Worker) ProcessAppendToTrackerMessages() {
 		func(msg *message.Message) error {
 			var payload TicketBookingConfirmed
 
+			if msg.UUID == "2beaf5bc-d5e4-4653-b075-2b36bbf28949" {
+				return nil
+			}
+
+			if msg.Metadata.Get("type") != "TicketBookingConfirmed" {
+				return nil
+			}
+
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				return err
+			}
+
+			if payload.Price.Currency == "" {
+				payload.Price.Currency = "USD"
 			}
 
 			if err := w.spreadSheetsClient.AppendRow(
@@ -346,8 +393,20 @@ func (w *Worker) ProcessTicketsToRefund() {
 		func(msg *message.Message) error {
 			var payload TicketBookingCanceled
 
+			if msg.UUID == malformedEventID {
+				return nil
+			}
+
+			if msg.Metadata.Get("type") != "TicketBookingCanceled" {
+				return nil
+			}
+
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				return err
+			}
+
+			if payload.Price.Currency == "" {
+				payload.Price.Currency = "USD"
 			}
 
 			if err := w.spreadSheetsClient.AppendRow(
