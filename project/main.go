@@ -18,6 +18,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
 	"github.com/labstack/echo/v4"
 	"github.com/lithammer/shortuuid/v3"
 	"github.com/redis/go-redis/v9"
@@ -101,8 +102,17 @@ func main() {
 		panic(err)
 	}
 
+	retryMiddleware := middleware.Retry{
+		MaxRetries:      10,
+		InitialInterval: time.Millisecond * 100,
+		MaxInterval:     time.Second,
+		Multiplier:      2,
+		Logger:          logger,
+	}
+
 	router.AddMiddleware(CorrelationIDMiddleware)
 	router.AddMiddleware(LoggingMiddleware)
+	router.AddMiddleware(retryMiddleware.Middleware)
 
 	worker := NewWorker(publisher, sub, NewReceiptsClient(clients), NewSpreadsheetsClient(clients), router)
 	go worker.ProcessIssueReceiptMessages()
