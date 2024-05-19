@@ -2,18 +2,44 @@ package event
 
 import (
 	"context"
+	"fmt"
 
 	"tickets/entities"
 
 	"github.com/ThreeDotsLabs/go-event-driven/common/log"
 )
 
-func (h Handler) CancelTicket(ctx context.Context, event entities.TicketBookingCanceled) error {
-	log.FromContext(ctx).Info("Adding ticket refund to sheet")
+type CancelTicketHandler struct {
+	service SpreadsheetsAPI
+}
 
-	return h.spreadsheetsService.AppendRow(
+func NewCancelTicketHandler(service SpreadsheetsAPI) *CancelTicketHandler {
+	return &CancelTicketHandler{service: service}
+}
+
+func (handler *CancelTicketHandler) HandlerName() string {
+	return "CancelTicket"
+}
+
+func (handler *CancelTicketHandler) NewEvent() interface{} {
+	return &entities.TicketBookingCanceled{}
+}
+
+func (handler *CancelTicketHandler) Handle(ctx context.Context, event any) error {
+	ticketBooking, ok := event.(*entities.TicketBookingCanceled)
+	if !ok {
+		return fmt.Errorf("unexpected event type: %T", event)
+	}
+	log.FromContext(ctx).Info("Issuing receipt: '%s'", ticketBooking.TicketID)
+
+	return handler.service.AppendRow(
 		ctx,
 		"tickets-to-refund",
-		[]string{event.TicketID, event.CustomerEmail, event.Price.Amount, event.Price.Currency},
+		[]string{
+			ticketBooking.TicketID,
+			ticketBooking.CustomerEmail,
+			ticketBooking.Price.Amount,
+			ticketBooking.Price.Currency,
+		},
 	)
 }

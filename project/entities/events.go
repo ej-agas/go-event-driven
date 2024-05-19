@@ -23,6 +23,7 @@ type TicketBookingConfirmed struct {
 	TicketID      string      `json:"ticket_id"`
 	CustomerEmail string      `json:"customer_email"`
 	Price         Price       `json:"price"`
+	BookingID     string      `json:"booking_id"`
 }
 
 type TicketBookingCanceled struct {
@@ -30,4 +31,17 @@ type TicketBookingCanceled struct {
 	TicketID      string      `json:"ticket_id"`
 	CustomerEmail string      `json:"customer_email"`
 	Price         Price       `json:"price"`
+}
+
+type TicketRefunded struct {
+	Header   EventHeader `json:"header"`
+	TicketID string      `json:"ticket_id"`
+}
+
+type BookingMade struct {
+	Header          EventHeader `json:"header"`
+	NumberOfTickets int         `json:"number_of_tickets"`
+	BookingID       uuid.UUID   `json:"booking_id"`
+	CustomerEmail   string      `json:"customer_email"`
+	ShowId          uuid.UUID   `json:"show_id"`
 }
