@@ -5,16 +5,15 @@ import (
 	"fmt"
 
 	"tickets/entities"
-	"tickets/repository"
 
 	"github.com/ThreeDotsLabs/go-event-driven/common/log"
 )
 
 type SaveToDatabaseHandler struct {
-	repository *repository.TicketRepository
+	repository TicketsRepository
 }
 
-func NewSaveToDatabaseHandler(repository *repository.TicketRepository) *SaveToDatabaseHandler {
+func NewSaveToDatabaseHandler(repository TicketsRepository) *SaveToDatabaseHandler {
 	return &SaveToDatabaseHandler{repository}
 }
 
@@ -34,5 +33,9 @@ func (handler *SaveToDatabaseHandler) Handle(ctx context.Context, event any) err
 		return fmt.Errorf("unexpected event type: %T", event)
 	}
 
-	return handler.repository.SaveTicketBooking(ctx, *ticketBooking)
+	return handler.repository.Save(ctx, &entities.Ticket{
+		ID:            ticketBooking.TicketID,
+		Price:         ticketBooking.Price,
+		CustomerEmail: ticketBooking.CustomerEmail,
+	})
 }

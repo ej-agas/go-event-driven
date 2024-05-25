@@ -9,7 +9,6 @@ import (
 	ticketsHttp "tickets/http"
 	"tickets/message"
 	"tickets/message/event"
-	"tickets/repository"
 
 	"github.com/ThreeDotsLabs/go-event-driven/common/log"
 	watermillMessage "github.com/ThreeDotsLabs/watermill/message"
@@ -48,8 +47,7 @@ func New(
 		watermillLogger,
 	)
 
-	ticketRepository := repository.NewTicketRepository(db.NewPostgresDatabase(postgres))
-
+	ticketRepository := db.NewTicketRepository(postgres)
 	eventProcessorConfig := event.NewProcessorConfig(redisClient, watermillLogger)
 	event.RegisterEventHandlers(
 		watermillRouter,
