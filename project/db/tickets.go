@@ -37,3 +37,37 @@ func (repository *TicketRepository) Delete(ctx context.Context, id string) error
 
 	return nil
 }
+
+func (repository *TicketRepository) All(ctx context.Context) ([]entities.Ticket, error) {
+	q := `SELECT ticket_id, price_amount, price_currency, customer_email FROM tickets;`
+	rows, err := repository.db.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching tickets: %w", err)
+	}
+	defer rows.Close()
+
+	var tickets []entities.Ticket
+	for rows.Next() {
+		var ticket entities.Ticket
+		var priceAmount float64
+		var priceCurrency string
+
+		err := rows.Scan(&ticket.ID, &priceAmount, &priceCurrency, &ticket.CustomerEmail)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning ticket row: %w", err)
+		}
+
+		ticket.Price = entities.Price{
+			Amount:   fmt.Sprintf("%.2f", priceAmount),
+			Currency: priceCurrency,
+		}
+
+		tickets = append(tickets, ticket)
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("error iterating over ticket rows: %w", rows.Err())
+	}
+
+	return tickets, nil
+}

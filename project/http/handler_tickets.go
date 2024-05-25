@@ -58,3 +58,13 @@ func (h Handler) PostTicketsStatus(c echo.Context) error {
 
 	return c.NoContent(http.StatusOK)
 }
+
+func (h Handler) ListTickets(c echo.Context) error {
+	tickets, err := h.repository.All(c.Request().Context())
+
+	if err != nil {
+		return fmt.Errorf("error fetching tickets: %w", err)
+	}
+
+	return c.JSON(http.StatusOK, tickets)
+}
