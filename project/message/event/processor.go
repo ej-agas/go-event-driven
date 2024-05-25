@@ -1,6 +1,8 @@
 package event
 
 import (
+	"tickets/repository"
+
 	"github.com/ThreeDotsLabs/watermill/components/cqrs"
 	"github.com/ThreeDotsLabs/watermill/message"
 )
@@ -10,6 +12,7 @@ func RegisterEventHandlers(
 	config cqrs.EventProcessorConfig,
 	spreadsheetsService SpreadsheetsAPI,
 	receiptsService ReceiptsService,
+	repository *repository.TicketRepository,
 ) *cqrs.EventProcessor {
 	eventProcessor, err := cqrs.NewEventProcessorWithConfig(router, config)
 	if err != nil {
@@ -20,6 +23,7 @@ func RegisterEventHandlers(
 		NewAppendToTrackerHandler(spreadsheetsService),
 		NewCancelTicketHandler(spreadsheetsService),
 		NewIssueReceiptHandler(receiptsService),
+		NewSaveToDatabaseHandler(repository),
 	)
 	if err != nil {
 		panic(err)

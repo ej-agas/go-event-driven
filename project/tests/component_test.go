@@ -15,6 +15,7 @@ import (
 	"tickets/service"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lithammer/shortuuid/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,12 +28,20 @@ func TestComponent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	postgres, err := pgxpool.New(context.Background(), os.Getenv("POSTGRES_URL"))
+	if err != nil {
+		panic(err)
+	}
+
+	defer postgres.Close()
+
 	spreadsheetsService := &api.SpreadsheetsAPIMock{}
 	receiptsService := &api.ReceiptsServiceMock{}
 
 	go func() {
 		svc := service.New(
 			redisClient,
+			postgres,
 			spreadsheetsService,
 			receiptsService,
 		)

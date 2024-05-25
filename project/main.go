@@ -12,6 +12,7 @@ import (
 
 	"github.com/ThreeDotsLabs/go-event-driven/common/clients"
 	"github.com/ThreeDotsLabs/go-event-driven/common/log"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -35,8 +36,15 @@ func main() {
 	spreadsheetsService := api.NewSpreadsheetsAPIClient(apiClients)
 	receiptsService := api.NewReceiptsServiceClient(apiClients)
 
+	postgres, err := pgxpool.New(context.Background(), os.Getenv("POSTGRES_URL"))
+	if err != nil {
+		panic(err)
+	}
+	defer postgres.Close()
+
 	err = service.New(
 		redisClient,
+		postgres,
 		spreadsheetsService,
 		receiptsService,
 	).Run(ctx)
