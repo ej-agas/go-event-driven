@@ -27,3 +27,13 @@ func (repository *TicketRepository) Save(ctx context.Context, ticket *entities.T
 
 	return nil
 }
+
+func (repository *TicketRepository) Delete(ctx context.Context, id string) error {
+	_, err := repository.db.Exec(ctx, "DELETE FROM tickets WHERE ticket_id = $1;", id)
+
+	if err != nil {
+		return fmt.Errorf("error deleting ticket: %w", err)
+	}
+
+	return nil
+}

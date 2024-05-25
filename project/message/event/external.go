@@ -16,4 +16,5 @@ type ReceiptsService interface {
 
 type TicketsRepository interface {
 	Save(ctx context.Context, ticket *entities.Ticket) error
+	Delete(ctx context.Context, ticketID string) error
 }

@@ -24,6 +24,7 @@ func RegisterEventHandlers(
 		NewCancelTicketHandler(spreadsheetsService),
 		NewIssueReceiptHandler(receiptsService),
 		NewSaveToDatabaseHandler(repository),
+		NewDeleteCanceledTicketsHandler(repository),
 	)
 	if err != nil {
 		panic(err)
