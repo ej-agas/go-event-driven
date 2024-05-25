@@ -18,7 +18,14 @@ func NewTicketRepository(db *pgxpool.Pool) *TicketRepository {
 }
 
 func (repository *TicketRepository) Save(ctx context.Context, ticket *entities.Ticket) error {
-	q := `INSERT INTO tickets (ticket_id, price_amount, price_currency, customer_email) VALUES ($1, $2, $3, $4);`
+	q := `INSERT INTO tickets (
+		 ticket_id, 
+		 price_amount, 
+		 price_currency, 
+		 customer_email
+		 ) VALUES ($1, $2, $3, $4) 
+		   ON CONFLICT DO NOTHING;
+	`
 
 	_, err := repository.db.Exec(ctx, q, ticket.ID, ticket.Price.Amount, ticket.Price.Currency, ticket.CustomerEmail)
 	if err != nil {
