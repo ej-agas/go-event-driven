@@ -36,3 +36,20 @@ func (api *FilesAPIClient) Upload(ctx context.Context, name, contents string) er
 
 	return nil
 }
+
+func (api *FilesAPIClient) Download(ctx context.Context, name string) (string, error) {
+	res, err := api.clients.Files.GetFilesFileIdContentWithResponse(ctx, name)
+	if err != nil {
+		return "", fmt.Errorf("file api returned an error: %w", err)
+	}
+
+	if res.StatusCode() == http.StatusNotFound {
+		return "", nil
+	}
+
+	if res.StatusCode() != http.StatusOK {
+		return "", fmt.Errorf("unexpected status code while getting file %s: %d", name, res.StatusCode())
+	}
+
+	return string(res.Body), nil
+}

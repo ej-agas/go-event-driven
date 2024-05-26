@@ -22,6 +22,7 @@ type ticketStatusRequest struct {
 }
 
 func (h Handler) PostTicketsStatus(c echo.Context) error {
+	idempotencyKey := c.Request().Header.Get("Idempotency-Key")
 	var request ticketsStatusRequest
 	err := c.Bind(&request)
 	if err != nil {
@@ -31,7 +32,7 @@ func (h Handler) PostTicketsStatus(c echo.Context) error {
 	for _, ticket := range request.Tickets {
 		if ticket.Status == "confirmed" {
 			event := entities.TicketBookingConfirmed{
-				Header:        entities.NewEventHeader(),
+				Header:        entities.NewEventHeaderWithIdempotencyKey(idempotencyKey),
 				TicketID:      ticket.TicketID,
 				Price:         ticket.Price,
 				CustomerEmail: ticket.CustomerEmail,
@@ -42,7 +43,7 @@ func (h Handler) PostTicketsStatus(c echo.Context) error {
 			}
 		} else if ticket.Status == "canceled" {
 			event := entities.TicketBookingCanceled{
-				Header:        entities.NewEventHeader(),
+				Header:        entities.NewEventHeaderWithIdempotencyKey(idempotencyKey),
 				TicketID:      ticket.TicketID,
 				CustomerEmail: ticket.CustomerEmail,
 				Price:         ticket.Price,

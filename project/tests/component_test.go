@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"tickets/api"
+	"tickets/db"
 	"tickets/entities"
 	"tickets/message"
 	"tickets/service"
@@ -37,6 +38,7 @@ func TestComponent(t *testing.T) {
 
 	spreadsheetsService := &api.SpreadsheetsAPIMock{}
 	receiptsService := &api.ReceiptsServiceMock{}
+	fileAPI := &api.FilesAPIClientMock{}
 
 	go func() {
 		svc := service.New(
@@ -44,6 +46,7 @@ func TestComponent(t *testing.T) {
 			postgres,
 			spreadsheetsService,
 			receiptsService,
+			fileAPI,
 		)
 		assert.NoError(t, svc.Run(ctx))
 	}()
@@ -61,10 +64,17 @@ func TestComponent(t *testing.T) {
 		BookingID: uuid.NewString(),
 	}
 
-	sendTicketsStatus(t, TicketsStatusRequest{Tickets: []TicketStatus{ticket}})
+	idempotencyKey := uuid.NewString()
+
+	// test for idempotency
+	for i := 0; i < 3; i++ {
+		sendTicketsStatus(t, TicketsStatusRequest{Tickets: []TicketStatus{ticket}}, idempotencyKey)
+	}
 
 	assertReceiptForTicketIssued(t, receiptsService, ticket)
+	assertTicketUploaded(t, fileAPI, ticket)
 	assertRowToSheetAdded(t, spreadsheetsService, ticket, "tickets-to-print")
+	assertTicketStoredInRepository(t, postgres, ticket)
 
 	failedTicket := TicketStatus{
 		TicketID: uuid.NewString(),
@@ -77,7 +87,7 @@ func TestComponent(t *testing.T) {
 		BookingID: uuid.NewString(),
 	}
 
-	sendTicketsStatus(t, TicketsStatusRequest{Tickets: []TicketStatus{failedTicket}})
+	sendTicketsStatus(t, TicketsStatusRequest{Tickets: []TicketStatus{failedTicket}}, uuid.NewString())
 	assertRowToSheetAdded(t, spreadsheetsService, failedTicket, "tickets-to-refund")
 }
 
@@ -119,7 +129,7 @@ type Money struct {
 	Currency string `json:"currency"`
 }
 
-func sendTicketsStatus(t *testing.T, req TicketsStatusRequest) {
+func sendTicketsStatus(t *testing.T, req TicketsStatusRequest, idempotencyKey string) {
 	t.Helper()
 
 	payload, err := json.Marshal(req)
@@ -141,6 +151,7 @@ func sendTicketsStatus(t *testing.T, req TicketsStatusRequest) {
 
 	httpReq.Header.Set("Correlation-ID", correlationID)
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Idempotency-Key", idempotencyKey)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	require.NoError(t, err)
@@ -195,6 +206,50 @@ func assertRowToSheetAdded(t *testing.T, spreadsheetsService *api.SpreadsheetsAP
 			}
 
 			assert.Contains(t, allValues, ticket.TicketID, "ticket id not found in sheet %s", sheetName)
+		},
+		10*time.Second,
+		100*time.Millisecond,
+	)
+}
+
+func assertTicketStoredInRepository(t *testing.T, postgres *pgxpool.Pool, ticket TicketStatus) {
+	ticketsRepo := db.NewTicketRepository(postgres)
+
+	assert.Eventually(
+		t,
+		func() bool {
+			tickets, err := ticketsRepo.All(context.Background())
+			if err != nil {
+				return false
+			}
+
+			for _, t := range tickets {
+				if t.ID == ticket.TicketID {
+					return true
+				}
+			}
+
+			return false
+		},
+		10*time.Second,
+		100*time.Millisecond,
+	)
+}
+
+func assertTicketUploaded(t *testing.T, service *api.FilesAPIClientMock, ticket TicketStatus) bool {
+	return assert.EventuallyWithT(
+		t,
+		func(t *assert.CollectT) {
+			content, err := service.Download(context.Background(), ticket.TicketID+"-ticket.html")
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			if assert.NotEmpty(t, content) {
+				return
+			}
+
+			assert.Contains(t, content, ticket.TicketID)
 		},
 		10*time.Second,
 		100*time.Millisecond,

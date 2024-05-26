@@ -5,8 +5,9 @@ import (
 )
 
 type IssueReceiptRequest struct {
-	TicketID string
-	Price    Price
+	IdempotencyKey string
+	TicketID       string
+	Price          Price
 }
 
 type IssueReceiptResponse struct {

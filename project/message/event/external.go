@@ -20,5 +20,6 @@ type TicketsRepository interface {
 }
 
 type FilesAPI interface {
-	Upload(ctx context.Context, fileID, contents string) error
+	Upload(ctx context.Context, name, contents string) error
+	Download(ctx context.Context, name string) (string, error)
 }
