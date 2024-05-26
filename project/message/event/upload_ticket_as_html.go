@@ -7,14 +7,16 @@ import (
 	"tickets/entities"
 
 	"github.com/ThreeDotsLabs/go-event-driven/common/log"
+	"github.com/ThreeDotsLabs/watermill/components/cqrs"
 )
 
 type SaveToFileHandler struct {
-	api FilesAPI
+	api      FilesAPI
+	eventBus *cqrs.EventBus
 }
 
-func NewSaveToFileHandler(api FilesAPI) *SaveToFileHandler {
-	return &SaveToFileHandler{api}
+func NewSaveToFileHandler(api FilesAPI, eventBus *cqrs.EventBus) *SaveToFileHandler {
+	return &SaveToFileHandler{api, eventBus}
 }
 
 func (handler *SaveToFileHandler) HandlerName() string {
@@ -48,9 +50,21 @@ func (handler *SaveToFileHandler) Handle(ctx context.Context, event any) error {
 	</body>
 	</html>
 `
-	err := handler.api.Upload(ctx, fmt.Sprintf("%s-ticket.html", ticketBooking.TicketID), body)
+
+	fileName := fmt.Sprintf("%s-ticket.html", ticketBooking.TicketID)
+	err := handler.api.Upload(ctx, fileName, body)
 	if err != nil {
 		return fmt.Errorf("save ticket booking failed: %w", err)
+	}
+
+	err = handler.eventBus.Publish(ctx, entities.TicketPrinted{
+		Header:   entities.NewEventHeader(),
+		TicketID: ticketBooking.TicketID,
+		FileName: fileName,
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to publish ticket printed event: %w", err)
 	}
 
 	return nil

@@ -57,6 +57,7 @@ func New(
 		receiptsService,
 		ticketRepository,
 		filesService,
+		eventBus,
 	)
 
 	echoRouter := ticketsHttp.NewHttpRouter(
