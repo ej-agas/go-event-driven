@@ -18,3 +18,7 @@ type TicketsRepository interface {
 	Save(ctx context.Context, ticket *entities.Ticket) error
 	Delete(ctx context.Context, ticketID string) error
 }
+
+type FilesAPI interface {
+	Upload(ctx context.Context, fileID, contents string) error
+}

@@ -34,6 +34,7 @@ func New(
 	postgres *pgxpool.Pool,
 	spreadsheetsService event.SpreadsheetsAPI,
 	receiptsService event.ReceiptsService,
+	filesService event.FilesAPI,
 ) Service {
 	watermillLogger := log.NewWatermill(log.FromContext(context.Background()))
 
@@ -55,6 +56,7 @@ func New(
 		spreadsheetsService,
 		receiptsService,
 		ticketRepository,
+		filesService,
 	)
 
 	echoRouter := ticketsHttp.NewHttpRouter(

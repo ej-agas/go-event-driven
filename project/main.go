@@ -35,6 +35,7 @@ func main() {
 
 	spreadsheetsService := api.NewSpreadsheetsAPIClient(apiClients)
 	receiptsService := api.NewReceiptsServiceClient(apiClients)
+	filesAPI := api.NewFilesAPIClient(apiClients)
 
 	postgres, err := pgxpool.New(context.Background(), os.Getenv("POSTGRES_URL"))
 	if err != nil {
@@ -47,6 +48,7 @@ func main() {
 		postgres,
 		spreadsheetsService,
 		receiptsService,
+		filesAPI,
 	).Run(ctx)
 	if err != nil {
 		panic(err)

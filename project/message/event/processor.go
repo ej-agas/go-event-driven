@@ -13,6 +13,7 @@ func RegisterEventHandlers(
 	spreadsheetsService SpreadsheetsAPI,
 	receiptsService ReceiptsService,
 	repository *db.TicketRepository,
+	filesService FilesAPI,
 ) *cqrs.EventProcessor {
 	eventProcessor, err := cqrs.NewEventProcessorWithConfig(router, config)
 	if err != nil {
@@ -25,6 +26,7 @@ func RegisterEventHandlers(
 		NewIssueReceiptHandler(receiptsService),
 		NewSaveToDatabaseHandler(repository),
 		NewDeleteCanceledTicketsHandler(repository),
+		NewSaveToFileHandler(filesService),
 	)
 	if err != nil {
 		panic(err)
