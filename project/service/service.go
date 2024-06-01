@@ -49,6 +49,9 @@ func New(
 	)
 
 	ticketRepository := db.NewTicketRepository(postgres)
+	showRepository := db.NewShowRepository(postgres)
+	bookingRepository := db.NewBookingRepository(postgres)
+
 	eventProcessorConfig := event.NewProcessorConfig(redisClient, watermillLogger)
 	event.RegisterEventHandlers(
 		watermillRouter,
@@ -64,6 +67,8 @@ func New(
 		eventBus,
 		spreadsheetsService,
 		ticketRepository,
+		showRepository,
+		bookingRepository,
 	)
 
 	return Service{

@@ -3,7 +3,6 @@ package http
 import (
 	"fmt"
 	"net/http"
-
 	"tickets/entities"
 
 	"github.com/labstack/echo/v4"
@@ -61,7 +60,7 @@ func (h Handler) PostTicketsStatus(c echo.Context) error {
 }
 
 func (h Handler) ListTickets(c echo.Context) error {
-	tickets, err := h.repository.All(c.Request().Context())
+	tickets, err := h.ticketRepository.All(c.Request().Context())
 
 	if err != nil {
 		return fmt.Errorf("error fetching tickets: %w", err)
