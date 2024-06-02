@@ -10,9 +10,11 @@ import (
 	"tickets/message"
 	"tickets/service"
 
+	"database/sql"
 	"github.com/ThreeDotsLabs/go-event-driven/common/clients"
 	"github.com/ThreeDotsLabs/go-event-driven/common/log"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -43,9 +45,12 @@ func main() {
 	}
 	defer postgres.Close()
 
+	stdLibDB, err := sql.Open("postgres", os.Getenv("POSTGRES_URL"))
+
 	err = service.New(
 		redisClient,
 		postgres,
+		stdLibDB,
 		spreadsheetsService,
 		receiptsService,
 		filesAPI,

@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	stdHTTP "net/http"
+	"tickets/message/outbox"
 
 	"tickets/db"
 	ticketsHttp "tickets/http"
@@ -32,6 +34,7 @@ type Service struct {
 func New(
 	redisClient *redis.Client,
 	postgres *pgxpool.Pool,
+	stdDB *sql.DB,
 	spreadsheetsService event.SpreadsheetsAPI,
 	receiptsService event.ReceiptsService,
 	filesService event.FilesAPI,
@@ -50,7 +53,10 @@ func New(
 
 	ticketRepository := db.NewTicketRepository(postgres)
 	showRepository := db.NewShowRepository(postgres)
-	bookingRepository := db.NewBookingRepository(postgres)
+	bookingRepository := db.NewBookingRepository(postgres, stdDB)
+
+	postgresSubscriber := outbox.NewPostgresSubscriber(stdDB, watermillLogger)
+	outbox.AddForwarderHandler(postgresSubscriber, redisPublisher, watermillRouter, watermillLogger)
 
 	eventProcessorConfig := event.NewProcessorConfig(redisClient, watermillLogger)
 	event.RegisterEventHandlers(

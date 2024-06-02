@@ -1,8 +1,6 @@
 package event
 
 import (
-	"tickets/db"
-
 	"github.com/ThreeDotsLabs/watermill/components/cqrs"
 	"github.com/ThreeDotsLabs/watermill/message"
 )
@@ -12,7 +10,7 @@ func RegisterEventHandlers(
 	config cqrs.EventProcessorConfig,
 	spreadsheetsService SpreadsheetsAPI,
 	receiptsService ReceiptsService,
-	repository *db.TicketRepository,
+	repository TicketsRepository,
 	filesService FilesAPI,
 	eventBus *cqrs.EventBus,
 ) *cqrs.EventProcessor {

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"net/http"
@@ -15,9 +16,8 @@ func (h Handler) CreateBooking(c echo.Context) error {
 	}
 
 	booking.ID = uuid.New()
-
 	if err := h.bookingRepository.Create(c.Request().Context(), booking); err != nil {
-		return err
+		return fmt.Errorf("error: error creating booking: %v", err)
 	}
 
 	response := struct {
